@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1e1e2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="拼图">
+<title>九宫格拼图</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --gap: 8px;
+    --board-size: min(90vw, 55vh, 440px);
+    --inner: calc(var(--board-size) - 2 * var(--gap));
+    --tile-size: calc((var(--inner) - 2 * var(--gap)) / 3);
+    --ref-size: 78px;
+  }
+  @supports (height: 100dvh) {
+    :root { --board-size: min(90vw, 55dvh, 440px); }
+  }
+
+  html, body { height: 100%; overscroll-behavior: none; overflow: hidden; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: radial-gradient(circle at 30% 0%, #2a2a3e, #1e1e2e 60%);
+    color: #cdd6f4;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; min-height: 100dvh;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right)
+             env(safe-area-inset-bottom) env(safe-area-inset-left);
+    user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+    touch-action: manipulation;
+  }
+
+  .app {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 14px; width: 100%; max-width: 520px; padding: 16px;
+  }
+
+  /* -------- 模式切换 -------- */
+  .mode-tabs {
+    display: flex; gap: 6px;
+    background: #313244; padding: 6px; border-radius: 14px;
+    width: var(--board-size);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+  }
+  .mode-tabs button {
+    flex: 1; padding: 11px 8px; border: none; border-radius: 10px;
+    background: transparent; color: #a6adc8;
+    font-family: inherit; font-size: 14px; font-weight: 700;
+    cursor: pointer; transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .mode-tabs button.active {
+    background: #89b4fa; color: #1e1e2e;
+    box-shadow: 0 2px 6px rgba(137,180,250,0.35);
+  }
+
+  /* -------- 信息栏（步数 / 时间 / 参考图） -------- */
+  .stats {
+    display: flex;
+    gap: 10px;
+    width: var(--board-size);
+    align-items: stretch;
+  }
+
+  .stat {
+    flex: 1;
+    background: #313244;
+    border-radius: 14px;
+    padding: 10px 8px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    min-width: 0;
+  }
+  .stat span {
+    display: block;
+    font-size: 22px;
+    font-weight: 800;
+    color: #89b4fa;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .stat small {
+    font-size: 11px;
+    color: #a6adc8;
+    letter-spacing: 1px;
+    margin-top: 2px;
+  }
+
+  /* 参考图块：只在图案/图片模式出现 */
+  .ref-stat {
+    display: none;
+    flex: 0 0 var(--ref-size);
+    background: #313244;
+    border-radius: 14px;
+    padding: 6px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: pointer;
+    transition: transform 0.12s, background 0.15s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .app.has-ref .ref-stat { display: flex; }
+  .ref-stat:active { transform: scale(0.95); background: #3b3d54; }
+
+  .ref-mini {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 8px;
+    background-size: cover;
+    background-position: center;
+    background-color: #181825;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+  }
+  .ref-stat small {
+    font-size: 10px;
+    color: #a6adc8;
+    letter-spacing: 0.5px;
+  }
+
+  /* -------- 棋盘 -------- */
+  .board-wrap {
+    width: var(--board-size); height: var(--board-size);
+    background: #181825; border-radius: 20px; padding: var(--gap);
+    box-shadow: 0 10px 36px rgba(0,0,0,0.5),
+                inset 0 1px 0 rgba(255,255,255,0.04);
+    position: relative;
+    transition: filter 0.25s;
+  }
+  .board-wrap.loading { filter: blur(3px) brightness(0.7); }
+  .board-wrap.loading::after {
+    content: "加载中…"; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #cdd6f4; font-size: 16px; font-weight: 600;
+    filter: blur(0);
+  }
+
+  #board { position: relative; width: 100%; height: 100%; }
+
+  .tile {
+    position: absolute; top: 0; left: 0;
+    width: var(--tile-size); height: var(--tile-size);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800;
+    transition: transform 0.13s cubic-bezier(0.2, 0.85, 0.3, 1);
+    will-change: transform;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tile:active { filter: brightness(0.92); }
+  .no-anim .tile { transition: none !important; }
+
+  #board.number .tile {
+    background: linear-gradient(145deg, #a6c8ff, #74c7ec);
+    border-radius: 14px;
+    color: #1e1e2e;
+    font-size: calc(var(--tile-size) * 0.42);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.35),
+                inset 0 1px 0 rgba(255,255,255,0.4);
+  }
+  #board.image .tile,
+  #board.pattern .tile {
+    background-size: 300% 300%;
+    background-repeat: no-repeat;
+    border-radius: 4px;
+    color: transparent;
+    overflow: hidden;
+  }
+  #board.image .tile .num,
+  #board.pattern .tile .num { display: none; }
+
+  /* -------- 参考图全屏浮层 -------- */
+  #ref-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.25s;
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    padding: 24px;
+    cursor: zoom-out;
+  }
+  #ref-overlay.show { opacity: 1; pointer-events: auto; }
+
+  #ref-overlay .ref-large {
+    width: min(85vw, 85vh, 500px);
+    height: min(85vw, 85vh, 500px);
+    border-radius: 18px;
+    background-size: cover;
+    background-position: center;
+    background-color: #181825;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.7),
+                0 0 0 3px rgba(255,255,255,0.15);
+    transform: scale(0.85);
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  #ref-overlay.show .ref-large { transform: scale(1); }
+
+  #ref-overlay .ref-hint {
+    position: absolute;
+    top: calc(env(safe-area-inset-top) + 20px);
+    left: 50%;
+    transform: translateX(-50%);
+    color: #cdd6f4;
+    font-size: 13px;
+    opacity: 0.7;
+    pointer-events: none;
+  }
+
+  /* -------- 图片工具条 -------- */
+  .img-tools {
+    display: none; gap: 10px; width: var(--board-size);
+  }
+  .img-tools.show { display: flex; }
+  .img-tools button,
+  .img-tools label {
+    flex: 1; padding: 12px;
+    background: #45475a; color: #cdd6f4;
+    border-radius: 12px; text-align: center;
+    font-size: 14px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    border: none; transition: background 0.15s, transform 0.1s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .img-tools button:active,
+  .img-tools label:active {
+    background: #585b70; transform: scale(0.97);
+  }
+
+  /* -------- 主按钮 -------- */
+  .actions { display: flex; gap: 12px; width: var(--board-size); }
+  .actions button {
+    flex: 1; padding: 15px; border: none; border-radius: 14px;
+    background: #89b4fa; color: #1e1e2e;
+    font-size: 15px; font-weight: 700; font-family: inherit;
+    cursor: pointer; transition: transform 0.1s, background 0.15s, opacity 0.15s;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  .actions button:active:not(:disabled) {
+    transform: scale(0.96); background: #74c7ec;
+  }
+  .actions button:disabled {
+    background: #45475a; color: #7f849c; cursor: not-allowed;
+  }
+
+  /* -------- 胜利浮层 -------- */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 100; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s;
+    -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    padding: 20px;
+  }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+  .overlay-card {
+    background: #313244; border-radius: 22px; padding: 32px 28px 28px;
+    text-align: center; transform: scale(0.85);
+    transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+    max-width: 320px; width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .overlay.show .overlay-card { transform: scale(1); }
+  .overlay-card h2 { font-size: 26px; margin-bottom: 14px; color: #a6e3a1; }
+  .overlay-card p {
+    color: #cdd6f4; margin-bottom: 24px; line-height: 1.7; font-size: 16px;
+  }
+  .overlay-card p strong { color: #f9e2af; font-size: 20px; }
+  .overlay-card button {
+    width: 100%; padding: 15px; border: none; border-radius: 14px;
+    background: #89b4fa; color: #1e1e2e;
+    font-size: 15px; font-weight: 700; font-family: inherit; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <div class="mode-tabs" id="mode-tabs">
+    <button data-mode="number" class="active">数字</button>
+    <button data-mode="pattern">图案</button>
+    <button data-mode="image">图片</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span id="moves">0</span><small>步数</small></div>
+    <div class="stat"><span id="time">00:00</span><small>时间</small></div>
+    <div class="ref-stat" id="ref-stat" title="点击查看大图">
+      <div class="ref-mini" id="ref-mini"></div>
+      <small>参考</small>
+    </div>
+  </div>
+
+  <div class="board-wrap" id="board-wrap">
+    <div id="board" class="number"></div>
+  </div>
+
+  <div class="img-tools" id="img-tools">
+    <button id="btn-shuffle-img">🎲 换一张</button>
+    <label id="label-upload">
+      📁 上传图片
+      <input type="file" id="file-input" accept="image/*" hidden>
+    </label>
+  </div>
+
+  <div class="actions">
+    <button id="btn-new">重新开始</button>
+    <button id="btn-solve">自动求解</button>
+  </div>
+</div>
+
+<div id="win-overlay" class="overlay">
+  <div class="overlay-card">
+    <h2 id="win-title">🎉 恭喜！</h2>
+    <p id="win-text"></p>
+    <button id="btn-again">再来一局</button>
+  </div>
+</div>
+
+<div id="ref-overlay">
+  <span class="ref-hint">点击任意位置关闭</span>
+  <div class="ref-large" id="ref-large"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const GOAL_KEY = '1,2,3,4,5,6,7,8,0';
+  const NEIGHBORS = [
+    [1,3], [0,2,4], [1,5],
+    [0,4,6], [1,3,5,7], [2,4,8],
+    [3,7], [4,6,8], [5,7]
+  ];
+
+  const app        = document.getElementById('app');
+  const boardEl    = document.getElementById('board');
+  const boardWrap  = document.getElementById('board-wrap');
+  const refStat    = document.getElementById('ref-stat');
+  const refMini    = document.getElementById('ref-mini');
+  const refOverlay = document.getElementById('ref-overlay');
+  const refLarge   = document.getElementById('ref-large');
+  const movesEl    = document.getElementById('moves');
+  const timeEl     = document.getElementById('time');
+  const winOverlay = document.getElementById('win-overlay');
+  const winTitle   = document.getElementById('win-title');
+  const winText    = document.getElementById('win-text');
+  const imgTools   = document.getElementById('img-tools');
+  const fileInput  = document.getElementById('file-input');
+  const labelUpload= document.getElementById('label-upload');
+  const btnNew     = document.getElementById('btn-new');
+  const btnSolve   = document.getElementById('btn-solve');
+  const modeTabs   = document.getElementById('mode-tabs');
+
+  let mode = 'number';
+  let patternSrc = null;
+  let imageSrc   = null;
+
+  let state = [];
+  let tiles = {};
+  let moves = 0;
+  let startTime = null;
+  let elapsed = 0;
+  let timerId = null;
+  let busy = false;
+
+  // ---------- 工具 ----------
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const fmt = sec => String(Math.floor(sec / 60)).padStart(2, '0') + ':' +
+                     String(sec % 60).padStart(2, '0');
+  const vibrate = p => { try { navigator.vibrate && navigator.vibrate(p); } catch(_){} };
+  const isSolved = () => state.join(',') === GOAL_KEY;
+  const currentImageSrc = () => mode === 'pattern' ? patternSrc
+                          : mode === 'image'   ? imageSrc   : null;
+
+  function preloadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload  = () => resolve(img);
+      img.onerror = () => reject(new Error('image load failed: ' + src));
+      img.src = src;
+    });
+  }
+
+  // ---------- 随机图案 ----------
+  function generatePattern(size = 900) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+
+    const palettes = [
+      ['#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1'],
+      ['#f368e0', '#ff9ff3', '#feca57', '#ff6348'],
+      ['#5f27cd', '#54a0ff', '#00d2d3', '#1dd1a1'],
+      ['#ee5a24', '#f0932b', '#fdcb6e', '#ffdd59'],
+      ['#0abde3', '#10ac84', '#01a3a4', '#222f3e'],
+      ['#e056fd', '#686de0', '#30336b', '#22a6b3'],
+      ['#f0932b', '#eb4d4b', '#6ab04c', '#f9ca24'],
+    ];
+    const colors = palettes[(Math.random() * palettes.length) | 0];
+    const style = (Math.random() * 6) | 0;
+    const alpha = () => 0.4 + Math.random() * 0.6;
+
+    const bg = ctx.createLinearGradient(0, 0, size, size);
+    bg.addColorStop(0, colors[0]);
+    bg.addColorStop(1, colors[2]);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, size, size);
+
+    if (style === 0) {
+      for (let i = 0; i < 24; i++) {
+        ctx.globalAlpha = alpha();
+        ctx.fillStyle = colors[(Math.random() * colors.length) | 0];
+        ctx.beginPath();
+        ctx.arc(Math.random()*size, Math.random()*size,
+                40 + Math.random()*size*0.35, 0, Math.PI*2);
+        ctx.fill();
+      }
+    } else if (style === 1) {
+      for (let i = 0; i < 18; i++) {
+        ctx.globalAlpha = 0.5 + Math.random() * 0.4;
+        ctx.fillStyle = colors[(Math.random() * colors.length) | 0];
+        const x = Math.random()*size, y = Math.random()*size;
+        const s = 80 + Math.random()*220;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + s*(Math.random()*0.8+0.2), y + s*(Math.random()*0.5));
+        ctx.lineTo(x + s*(Math.random()*0.5), y + s*(Math.random()*0.8+0.2));
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else if (style === 2) {
+      ctx.save();
+      ctx.translate(size/2, size/2);
+      ctx.rotate(Math.random() * Math.PI);
+      ctx.translate(-size/2, -size/2);
+      const w = 30 + Math.random() * 50;
+      for (let x = -size; x < size * 2; x += w * 2) {
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = colors[(Math.random() * colors.length) | 0];
+        ctx.fillRect(x, -size, w, size * 3);
+      }
+      ctx.restore();
+    } else if (style === 3) {
+      for (let i = 0; i < 10; i++) {
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 12 + Math.random() * 45;
+        ctx.strokeStyle = colors[(Math.random() * colors.length) | 0];
+        ctx.beginPath();
+        ctx.arc(size/2 + (Math.random()-0.5)*size*0.5,
+                size/2 + (Math.random()-0.5)*size*0.5,
+                40 + Math.random()*size*0.4, 0, Math.PI*2);
+        ctx.stroke();
+      }
+    } else if (style === 4) {
+      const r = 15 + Math.random() * 30;
+      const step = r * 3;
+      for (let y = 0; y < size + step; y += step) {
+        for (let x = 0; x < size + step; x += step) {
+          ctx.globalAlpha = 0.65;
+          ctx.fillStyle = colors[(Math.random() * colors.length) | 0];
+          ctx.beginPath();
+          ctx.arc(x + Math.random()*step*0.4, y + Math.random()*step*0.4,
+                  r, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+    } else {
+      const n = 5 + ((Math.random() * 4) | 0);
+      const s = size / n;
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = colors[(Math.random() * colors.length) | 0];
+          ctx.fillRect(c*s, r*s, s, s);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+    return c.toDataURL('image/jpeg', 0.9);
+  }
+
+  // ---------- 图片处理 ----------
+  async function loadNetworkImage() {
+    const seed = Math.random().toString(36).slice(2);
+    const url = `https://picsum.photos/seed/${seed}/900/900`;
+    await preloadImage(url);
+    return url;
+  }
+
+  function loadLocalFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = ev => {
+        const img = new Image();
+        img.onerror = reject;
+        img.onload = () => {
+          const S = 900;
+          const c = document.createElement('canvas');
+          c.width = c.height = S;
+          const ctx = c.getContext('2d');
+          const s = Math.min(img.width, img.height);
+          const ox = (img.width - s) / 2;
+          const oy = (img.height - s) / 2;
+          ctx.drawImage(img, ox, oy, s, s, 0, 0, S, S);
+          resolve(c.toDataURL('image/jpeg', 0.92));
+        };
+        img.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // ---------- 渲染 ----------
+  function buildTiles() {
+    boardEl.innerHTML = '';
+    tiles = {};
+    for (let v = 1; v <= 8; v++) {
+      const el = document.createElement('div');
+      el.className = 'tile';
+      el.innerHTML = '<span class="num">' + v + '</span>';
+      el.addEventListener('pointerdown', ev => {
+        ev.preventDefault();
+        onTap(v);
+      });
+      boardEl.appendChild(el);
+      tiles[v] = el;
+    }
+  }
+
+  function layout(animate = true) {
+    if (!animate) boardEl.classList.add('no-anim');
+    for (let i = 0; i < 9; i++) {
+      const v = state[i];
+      if (v === 0) continue;
+      const r = (i / 3) | 0, c = i % 3;
+      tiles[v].style.transform =
+        `translate(calc(${c} * (var(--tile-size) + var(--gap))),` +
+        `calc(${r} * (var(--tile-size) + var(--gap))))`;
+    }
+    if (!animate) {
+      void boardEl.offsetHeight;
+      requestAnimationFrame(() => boardEl.classList.remove('no-anim'));
+    }
+  }
+
+  function applyImageToTiles() {
+    const src = currentImageSrc();
+    for (let v = 1; v <= 8; v++) {
+      const el = tiles[v];
+      if (!src) { el.style.backgroundImage = ''; continue; }
+      const r = ((v - 1) / 3) | 0;
+      const c = (v - 1) % 3;
+      el.style.backgroundImage = `url("${src}")`;
+      el.style.backgroundPosition = `${c * 50}% ${r * 50}%`;
+    }
+  }
+
+  // 更新信息栏里的参考图
+  function updateRefMini() {
+    const src = currentImageSrc();
+    if (src && mode !== 'number') {
+      refMini.style.backgroundImage = `url("${src}")`;
+      app.classList.add('has-ref');
+    } else {
+      refMini.style.backgroundImage = '';
+      app.classList.remove('has-ref');
+    }
+  }
+
+  function applyMode() {
+    boardEl.className = mode;
+    if (mode === 'number') {
+      for (const v in tiles) tiles[v].style.backgroundImage = '';
+    } else {
+      applyImageToTiles();
+    }
+    imgTools.classList.toggle('show', mode !== 'number');
+    labelUpload.style.display = mode === 'image' ? '' : 'none';
+    updateRefMini();
+  }
+
+  // ---------- 打乱 ----------
+  function shuffle() {
+    while (true) {
+      let s = [1,2,3,4,5,6,7,8,0];
+      let prev = -1;
+      for (let k = 0; k < 250; k++) {
+        const e = s.indexOf(0);
+        const cand = NEIGHBORS[e].filter(n => n !== prev);
+        const n = cand[(Math.random() * cand.length) | 0];
+        [s[e], s[n]] = [s[n], s[e]];
+        prev = e;
+      }
+      if (s.join(',') !== GOAL_KEY && manhattan(s) >= 10) return s;
+    }
+  }
+
+  function manhattan(s) {
+    let d = 0;
+    for (let i = 0; i < 9; i++) {
+      const v = s[i];
+      if (v === 0) continue;
+      const tr = ((v - 1) / 3) | 0, tc = (v - 1) % 3;
+      const r = (i / 3) | 0, c = i % 3;
+      d += Math.abs(tr - r) + Math.abs(tc - c);
+    }
+    return d;
+  }
+
+  // ---------- 计时 ----------
+  function startTimer() {
+    if (timerId) return;
+    timerId = setInterval(() => {
+      if (!startTime) return;
+      elapsed = Date.now() - startTime;
+      timeEl.textContent = fmt(Math.floor(elapsed / 1000));
+    }, 250);
+  }
+  function stopTimer() {
+    if (timerId) { clearInterval(timerId); timerId = null; }
+  }
+
+  // ---------- 新一局 ----------
+  async function newGame(changeVisual = false) {
+    winOverlay.classList.remove('show');
+    stopTimer();
+    moves = 0; startTime = null; elapsed = 0; busy = false;
+    btnSolve.disabled = false; btnNew.disabled = false;
+    btnSolve.textContent = '自动求解';
+    movesEl.textContent = '0';
+    timeEl.textContent = '00:00';
+
+    if (mode === 'pattern' && (changeVisual || !patternSrc)) {
+      patternSrc = generatePattern();
+    }
+    if (mode === 'image' && (changeVisual || !imageSrc)) {
+      await fetchNetworkImage(true);
+    }
+
+    state = shuffle();
+    applyMode();
+    layout(false);
+  }
+
+  async function fetchNetworkImage(showLoading = false) {
+    if (showLoading) boardWrap.classList.add('loading');
+    try {
+      imageSrc = await loadNetworkImage();
+    } catch (e) {
+      imageSrc = generatePattern();
+    } finally {
+      boardWrap.classList.remove('loading');
+    }
+    applyImageToTiles();
+    updateRefMini();
+  }
+
+  // ---------- 交互 ----------
+  function onTap(v) {
+    if (busy) return;
+    const e = state.indexOf(0);
+    const i = state.indexOf(v);
+    if (!NEIGHBORS[e].includes(i)) return;
+
+    if (!startTime) startTime = Date.now() - elapsed;
+    startTimer();
+
+    const next = state.slice();
+    next[e] = v;
+    next[i] = 0;
+    state = next;
+
+    moves++;
+    movesEl.textContent = moves;
+    layout();
+    vibrate(8);
+
+    if (isSolved()) setTimeout(showWin, 200);
+  }
+
+  function showWin() {
+    stopTimer();
+    winTitle.textContent = '🎉 恭喜！';
+    winText.innerHTML =
+      `用了 <strong>${moves}</strong> 步<br>耗时 ${fmt(Math.floor(elapsed / 1000))}`;
+    winOverlay.classList.add('show');
+    vibrate([30, 50, 30]);
+  }
+
+  // ---------- A* ----------
+  class MinHeap {
+    constructor() { this.a = []; }
+    get size() { return this.a.length; }
+    push(item) {
+      const a = this.a;
+      a.push(item);
+      let i = a.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (a[p].f <= a[i].f) break;
+        [a[p], a[i]] = [a[i], a[p]];
+        i = p;
+      }
+    }
+    pop() {
+      const a = this.a;
+      const top = a[0];
+      const last = a.pop();
+      if (a.length) {
+        a[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = i * 2 + 1, r = l + 1;
+          let m = i;
+          if (l < a.length && a[l].f < a[m].f) m = l;
+          if (r < a.length && a[r].f < a[m].f) m = r;
+          if (m === i) break;
+          [a[m], a[i]] = [a[i], a[m]];
+          i = m;
+        }
+      }
+      return top;
+    }
+  }
+
+  function solve(startArr) {
+    const start = startArr.join(',');
+    if (start === GOAL_KEY) return [];
+    const g = new Map([[start, 0]]);
+    const parent = new Map([[start, null]]);
+    const heap = new MinHeap();
+    heap.push({ f: manhattan(startArr), g: 0, key: start, arr: startArr.slice() });
+
+    while (heap.size) {
+      const cur = heap.pop();
+      if (cur.g > (g.get(cur.key) ?? Infinity)) continue;
+      if (cur.key === GOAL_KEY) {
+        const path = [];
+        let k = cur.key;
+        while (k !== start) {
+          path.push(k.split(',').map(Number));
+          k = parent.get(k);
+        }
+        return path.reverse();
+      }
+      const e = cur.arr.indexOf(0);
+      for (const n of NEIGHBORS[e]) {
+        const arr = cur.arr.slice();
+        [arr[e], arr[n]] = [arr[n], arr[e]];
+        const key = arr.join(',');
+        const ng = cur.g + 1;
+        if (ng < (g.get(key) ?? Infinity)) {
+          g.set(key, ng);
+          parent.set(key, cur.key);
+          heap.push({ f: ng + manhattan(arr), g: ng, key, arr });
+        }
+      }
+    }
+    return null;
+  }
+
+  async function autoSolve() {
+    if (busy || isSolved()) return;
+    const path = solve(state);
+    if (!path) { alert('当前局面无解'); return; }
+    if (!path.length) return;
+
+    busy = true;
+    stopTimer();
+    btnSolve.disabled = true; btnNew.disabled = true;
+    btnSolve.textContent = '求解中…';
+
+    await sleep(150);
+    for (const next of path) {
+      state = next;
+      layout();
+      vibrate(6);
+      await sleep(170);
+    }
+    busy = false;
+    btnSolve.textContent = '自动求解';
+    btnSolve.disabled = false; btnNew.disabled = false;
+
+    if (isSolved()) {
+      winTitle.textContent = '🤖 求解完成';
+      winText.innerHTML = `最短路径共 <strong>${path.length}</strong> 步`;
+      winOverlay.classList.add('show');
+      vibrate([30, 50, 30]);
+    }
+  }
+
+  // ---------- 事件绑定 ----------
+  modeTabs.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-mode]');
+    if (!btn || busy) return;
+    const newMode = btn.dataset.mode;
+    if (newMode === mode) return;
+
+    mode = newMode;
+    [...modeTabs.children].forEach(b => b.classList.toggle('active', b === btn));
+
+    if (mode === 'pattern' && !patternSrc) {
+      patternSrc = generatePattern();
+    }
+    if (mode === 'image' && !imageSrc) {
+      await fetchNetworkImage(true);
+    }
+
+    applyMode();
+    layout(false);
+
+    if (!isSolved()) await newGame(false);
+  });
+
+  fileInput.addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    boardWrap.classList.add('loading');
+    try {
+      imageSrc = await loadLocalFile(f);
+      applyImageToTiles();
+      updateRefMini();
+      await newGame(false);
+    } catch (err) {
+      alert('图片加载失败');
+    } finally {
+      boardWrap.classList.remove('loading');
+      fileInput.value = '';
+    }
+  });
+
+  document.getElementById('btn-shuffle-img').addEventListener('click', async () => {
+    if (busy) return;
+    if (mode === 'pattern') {
+      patternSrc = generatePattern();
+      applyImageToTiles();
+      updateRefMini();
+      await newGame(false);
+    } else if (mode === 'image') {
+      await fetchNetworkImage(true);
+      await newGame(false);
+    }
+  });
+
+  // 点击参考图 → 全屏查看
+  refStat.addEventListener('click', () => {
+    const src = currentImageSrc();
+    if (!src) return;
+    refLarge.style.backgroundImage = `url("${src}")`;
+    refOverlay.classList.add('show');
+    vibrate(10);
+  });
+  refOverlay.addEventListener('click', () => {
+    refOverlay.classList.remove('show');
+  });
+
+  btnNew.addEventListener('click', () => { if (!busy) newGame(false); });
+  btnSolve.addEventListener('click', autoSolve);
+  document.getElementById('btn-again').addEventListener('click', () => newGame(false));
+
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  document.addEventListener('contextmenu', e => e.preventDefault());
+
+  // 初始化
+  buildTiles();
+  newGame(false);
+})();
+</script>
+</body>
+</html>
